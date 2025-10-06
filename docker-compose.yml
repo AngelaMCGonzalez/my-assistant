@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  assistant:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - SECRET_KEY=${SECRET_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ULTRAMSG_API_URL=${ULTRAMSG_API_URL}
+      - ULTRAMSG_INSTANCE_ID=${ULTRAMSG_INSTANCE_ID}
+      - ULTRAMSG_TOKEN=${ULTRAMSG_TOKEN}
+      - MY_PHONE_NUMBER=${MY_PHONE_NUMBER}
+      - GMAIL_CREDENTIALS_FILE=/app/credentials/gmail_credentials.json
+      - GMAIL_TOKEN_FILE=/app/credentials/gmail_token.json
+      - CALENDAR_CREDENTIALS_FILE=/app/credentials/calendar_credentials.json
+      - CALENDAR_TOKEN_FILE=/app/credentials/calendar_token.json
+      - DATABASE_URL=postgresql://assistant:password@db:5432/assistant
+    volumes:
+      - ./credentials:/app/credentials
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=assistant
+      - POSTGRES_USER=assistant
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - assistant
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+
