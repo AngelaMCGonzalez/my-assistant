@@ -164,6 +164,24 @@ class WhatsAppIntegration:
             from_clean = from_number.replace("@c.us", "") if from_number else ""
             to_clean = to_number.replace("@c.us", "") if to_number else ""
             
+            # Normalize phone numbers for comparison (remove country codes if needed)
+            def normalize_phone(phone):
+                if not phone:
+                    return ""
+                # Remove @c.us suffix
+                phone = phone.replace("@c.us", "")
+                # If phone starts with 521, remove it (Mexico country code)
+                if phone.startswith("521"):
+                    phone = phone[3:]
+                # If phone starts with 52, remove it (Mexico country code)
+                elif phone.startswith("52"):
+                    phone = phone[2:]
+                return phone
+            
+            from_normalized = normalize_phone(from_number)
+            to_normalized = normalize_phone(to_number)
+            my_phone_normalized = normalize_phone(self.my_phone_number)
+            
             message_info = {
                 "message_id": message_data.get("id"),
                 "from": from_number,
@@ -171,8 +189,8 @@ class WhatsAppIntegration:
                 "body": message_data.get("body", ""),
                 "type": message_data.get("type", "text"),
                 "timestamp": message_data.get("timestamp"),
-                "is_from_me": to_clean == self.my_phone_number,
-                "is_to_ultramsg": to_clean == "5664087506",  # Messages TO UltraMsg
+                "is_from_me": to_normalized == my_phone_normalized,
+                "is_to_ultramsg": to_normalized == "5664087506",  # Messages TO UltraMsg
                 "raw_data": message_data
             }
             
