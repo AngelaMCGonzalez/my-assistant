@@ -40,7 +40,7 @@ email-validator==2.1.0
 
 # Natural language processing
 nltk==3.8.1
-spacy==3.7.2
+# spacy==3.7.2  # Commented out due to compilation issues
 
 # Calendar parsing
 dateparser==1.1.8
