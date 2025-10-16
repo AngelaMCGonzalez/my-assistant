@@ -88,6 +88,8 @@ class MessageRouter:
         if self.auto_check_emails and self._background_task is None:
             self._background_task = asyncio.create_task(self._email_monitoring_loop())
             logger.info("Background email monitoring started")
+        else:
+            logger.info("Background email monitoring disabled (auto_check_emails=False)")
     
     async def process_message(self, webhook_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -880,7 +882,7 @@ Respuestas:
     
     async def _email_monitoring_loop(self):
         """Background loop to monitor for new emails and replies"""
-        while True:
+        while self.auto_check_emails:  # Exit loop when auto-checking is disabled
             try:
                 if self.auto_check_emails:
                     # Check for new emails
@@ -894,12 +896,16 @@ Respuestas:
                         else:
                             await self._process_new_email(email, self.my_phone_number)
                 
-                # Wait before next check
-                await asyncio.sleep(self.email_check_interval)
+                # Wait before next check (only if still enabled)
+                if self.auto_check_emails:
+                    await asyncio.sleep(self.email_check_interval)
                 
             except Exception as e:
                 logger.error(f"Error in email monitoring loop: {str(e)}")
-                await asyncio.sleep(60)  # Wait 1 minute before retrying
+                if self.auto_check_emails:
+                    await asyncio.sleep(60)  # Wait 1 minute before retrying
+        
+        logger.info("Email monitoring loop stopped (auto-checking disabled)")
     
     async def process_new_email(self, email_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process a new email (called by webhook)"""
