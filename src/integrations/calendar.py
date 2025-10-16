@@ -45,29 +45,65 @@ class CalendarIntegration:
         """Authenticate with Google Calendar API"""
         try:
             creds = None
-            token_file = 'calendar_token.json'
             
-            # Load existing credentials
-            if os.path.exists(token_file):
-                creds = Credentials.from_authorized_user_file(token_file, self.scopes)
+            # Try to load credentials from environment variables first
+            calendar_credentials_json = os.getenv('CALENDAR_CREDENTIALS_JSON')
+            calendar_token_json = os.getenv('CALENDAR_TOKEN_JSON')
             
-            # If there are no valid credentials, get new ones
-            if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
-                else:
-                    credentials_file = os.getenv('CALENDAR_CREDENTIALS_FILE', './credentials/calendar_credentials.json')
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        credentials_file, self.scopes)
-                    creds = flow.run_local_server(port=0)
+            if calendar_credentials_json and calendar_token_json:
+                # Create temporary files from environment variables
+                import tempfile
                 
-                # Save credentials for next run
-                with open(token_file, 'w') as token:
-                    token.write(creds.to_json())
+                # Create credentials file
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as creds_file:
+                    creds_file.write(calendar_credentials_json)
+                    credentials_file_path = creds_file.name
+                
+                # Create token file
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as token_file:
+                    token_file.write(calendar_token_json)
+                    token_file_path = token_file.name
+                
+                # Load credentials from token file
+                creds = Credentials.from_authorized_user_file(token_file_path, self.scopes)
+                
+                # Clean up temporary files
+                os.unlink(credentials_file_path)
+                os.unlink(token_file_path)
+                
+            else:
+                # Fallback to file-based authentication
+                token_file = os.getenv('CALENDAR_TOKEN_FILE', './credentials/calendar_token.json')
+                credentials_file = os.getenv('CALENDAR_CREDENTIALS_FILE', './credentials/calendar_credentials.json')
+                
+                # Load existing credentials
+                if os.path.exists(token_file):
+                    creds = Credentials.from_authorized_user_file(token_file, self.scopes)
+                
+                # If there are no valid credentials, get new ones
+                if not creds or not creds.valid:
+                    if creds and creds.expired and creds.refresh_token:
+                        creds.refresh(Request())
+                    else:
+                        if os.path.exists(credentials_file):
+                            flow = InstalledAppFlow.from_client_secrets_file(
+                                credentials_file, self.scopes)
+                            creds = flow.run_local_server(port=0)
+                        else:
+                            logger.error(f"Calendar credentials file not found: {credentials_file}")
+                            return
+                    
+                    # Save credentials for next run
+                    with open(token_file, 'w') as token:
+                        token.write(creds.to_json())
             
-            self.credentials = creds
-            self.service = build('calendar', 'v3', credentials=creds)
-            logger.info("Google Calendar API authenticated successfully")
+            if creds and creds.valid:
+                self.credentials = creds
+                self.service = build('calendar', 'v3', credentials=creds)
+                logger.info("Google Calendar API authenticated successfully")
+            else:
+                logger.error("Calendar authentication failed: Invalid credentials")
+                self.service = None
             
         except Exception as e:
             logger.error(f"Calendar authentication failed: {str(e)}")

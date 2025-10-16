@@ -46,29 +46,65 @@ class GmailIntegration:
         """Authenticate with Gmail API"""
         try:
             creds = None
-            token_file = 'token.json'
             
-            # Load existing credentials
-            if os.path.exists(token_file):
-                creds = Credentials.from_authorized_user_file(token_file, self.scopes)
+            # Try to load credentials from environment variables first
+            gmail_credentials_json = os.getenv('GMAIL_CREDENTIALS_JSON')
+            gmail_token_json = os.getenv('GMAIL_TOKEN_JSON')
             
-            # If there are no valid credentials, get new ones
-            if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
-                else:
-                    credentials_file = os.getenv('GMAIL_CREDENTIALS_FILE', './credentials/gmail_credentials.json')
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        credentials_file, self.scopes)
-                    creds = flow.run_local_server(port=0)
+            if gmail_credentials_json and gmail_token_json:
+                # Create temporary files from environment variables
+                import tempfile
                 
-                # Save credentials for next run
-                with open(token_file, 'w') as token:
-                    token.write(creds.to_json())
+                # Create credentials file
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as creds_file:
+                    creds_file.write(gmail_credentials_json)
+                    credentials_file_path = creds_file.name
+                
+                # Create token file
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as token_file:
+                    token_file.write(gmail_token_json)
+                    token_file_path = token_file.name
+                
+                # Load credentials from token file
+                creds = Credentials.from_authorized_user_file(token_file_path, self.scopes)
+                
+                # Clean up temporary files
+                os.unlink(credentials_file_path)
+                os.unlink(token_file_path)
+                
+            else:
+                # Fallback to file-based authentication
+                token_file = os.getenv('GMAIL_TOKEN_FILE', './credentials/gmail_token.json')
+                credentials_file = os.getenv('GMAIL_CREDENTIALS_FILE', './credentials/gmail_credentials.json')
+                
+                # Load existing credentials
+                if os.path.exists(token_file):
+                    creds = Credentials.from_authorized_user_file(token_file, self.scopes)
+                
+                # If there are no valid credentials, get new ones
+                if not creds or not creds.valid:
+                    if creds and creds.expired and creds.refresh_token:
+                        creds.refresh(Request())
+                    else:
+                        if os.path.exists(credentials_file):
+                            flow = InstalledAppFlow.from_client_secrets_file(
+                                credentials_file, self.scopes)
+                            creds = flow.run_local_server(port=0)
+                        else:
+                            logger.error(f"Gmail credentials file not found: {credentials_file}")
+                            return
+                    
+                    # Save credentials for next run
+                    with open(token_file, 'w') as token:
+                        token.write(creds.to_json())
             
-            self.credentials = creds
-            self.service = build('gmail', 'v1', credentials=creds)
-            logger.info("Gmail API authenticated successfully")
+            if creds and creds.valid:
+                self.credentials = creds
+                self.service = build('gmail', 'v1', credentials=creds)
+                logger.info("Gmail API authenticated successfully")
+            else:
+                logger.error("Gmail authentication failed: Invalid credentials")
+                self.service = None
             
         except Exception as e:
             logger.error(f"Gmail authentication failed: {str(e)}")
