@@ -50,6 +50,9 @@ class CalendarIntegration:
             calendar_credentials_json = os.getenv('CALENDAR_CREDENTIALS_JSON')
             calendar_token_json = os.getenv('CALENDAR_TOKEN_JSON')
             
+            logger.info(f"Calendar credentials JSON available: {bool(calendar_credentials_json)}")
+            logger.info(f"Calendar token JSON available: {bool(calendar_token_json)}")
+            
             if calendar_credentials_json and calendar_token_json:
                 # Create temporary files from environment variables
                 import tempfile

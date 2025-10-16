@@ -51,6 +51,9 @@ class GmailIntegration:
             gmail_credentials_json = os.getenv('GMAIL_CREDENTIALS_JSON')
             gmail_token_json = os.getenv('GMAIL_TOKEN_JSON')
             
+            logger.info(f"Gmail credentials JSON available: {bool(gmail_credentials_json)}")
+            logger.info(f"Gmail token JSON available: {bool(gmail_token_json)}")
+            
             if gmail_credentials_json and gmail_token_json:
                 # Create temporary files from environment variables
                 import tempfile
