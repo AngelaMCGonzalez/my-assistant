@@ -160,6 +160,10 @@ class WhatsAppIntegration:
             # Debug logging
             logger.info(f"Received message - From: {from_number}, To: {to_number}, My number: {self.my_phone_number}")
             
+            # Extract phone numbers without @c.us suffix for comparison
+            from_clean = from_number.replace("@c.us", "") if from_number else ""
+            to_clean = to_number.replace("@c.us", "") if to_number else ""
+            
             message_info = {
                 "message_id": message_data.get("id"),
                 "from": from_number,
@@ -167,8 +171,8 @@ class WhatsAppIntegration:
                 "body": message_data.get("body", ""),
                 "type": message_data.get("type", "text"),
                 "timestamp": message_data.get("timestamp"),
-                "is_from_me": to_number == self.my_phone_number,
-                "is_to_ultramsg": to_number == "5664087506",  # Messages TO UltraMsg
+                "is_from_me": to_clean == self.my_phone_number,
+                "is_to_ultramsg": to_clean == "5664087506",  # Messages TO UltraMsg
                 "raw_data": message_data
             }
             
