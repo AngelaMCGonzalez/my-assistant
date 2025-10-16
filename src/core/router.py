@@ -42,6 +42,10 @@ class MessageRouter:
         self.sent_emails = {}  # thread_id -> email_info
         self._load_sent_emails()
         
+        # Track recent messages to prevent loops
+        self.recent_messages = {}  # phone -> [messages]
+        self.max_recent_messages = 5
+        
         # Background tasks will be started when the event loop is running
         self._background_task = None
     
@@ -146,8 +150,9 @@ class MessageRouter:
         if message.startswith("/"):
             return await self._handle_command(message, response_phone)
         
-        # Handle calendar commands
-        if any(word in message.lower() for word in ["schedule", "meeting", "appointment", "calendar"]):
+        # Handle calendar commands (more specific to avoid loops)
+        calendar_keywords = ["schedule", "meeting", "appointment", "agendar", "programar", "reunión", "cita"]
+        if any(word in message.lower() for word in calendar_keywords) and not any(word in message.lower() for word in ["resumen", "summary", "calendario"]):
             return await self._handle_calendar_command(message, response_phone)
         
         # Handle email commands (English and Spanish)
@@ -632,6 +637,11 @@ Respuesta sugerida: {response.get('response', 'No response')[:200]}...
                 start_time = datetime.fromisoformat(event['start'].replace('Z', '+00:00'))
                 response += f"• {start_time.strftime('%a %b %d, %I:%M %p')} - {event['title']}\n"
             
+            # Check for duplicate message to prevent loops
+            if self._is_duplicate_message(from_phone, response):
+                logger.warning(f"Prevented duplicate calendar summary to {from_phone}")
+                return {"status": "blocked", "message": "Duplicate message prevented"}
+            
             return await self.whatsapp.send_message(from_phone, response)
             
         except Exception as e:
@@ -906,6 +916,25 @@ Respuestas:
                     await asyncio.sleep(60)  # Wait 1 minute before retrying
         
         logger.info("Email monitoring loop stopped (auto-checking disabled)")
+    
+    def _is_duplicate_message(self, phone: str, message: str) -> bool:
+        """Check if this is a duplicate message to prevent loops"""
+        if phone not in self.recent_messages:
+            self.recent_messages[phone] = []
+        
+        # Check if this exact message was sent recently
+        if message in self.recent_messages[phone]:
+            logger.warning(f"Duplicate message detected for {phone}, ignoring")
+            return True
+        
+        # Add message to recent messages
+        self.recent_messages[phone].append(message)
+        
+        # Keep only recent messages
+        if len(self.recent_messages[phone]) > self.max_recent_messages:
+            self.recent_messages[phone] = self.recent_messages[phone][-self.max_recent_messages:]
+        
+        return False
     
     async def process_new_email(self, email_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process a new email (called by webhook)"""
