@@ -14,6 +14,7 @@ from src.integrations.calendar import CalendarIntegration
 from src.core.hitl import HITLManager
 from src.ai.summarizer import EmailSummarizer
 from src.ai.responder import EmailResponder
+from src.ai.conversation import ConversationAI
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +31,11 @@ class MessageRouter:
         # Initialize AI components
         self.summarizer = EmailSummarizer()
         self.responder = EmailResponder(calendar_integration=calendar)
+        self.conversation_ai = ConversationAI()
         
         # Configuration
         self.my_phone_number = whatsapp.my_phone_number
-        self.auto_check_emails = True
+        self.auto_check_emails = False  # Disabled to prevent automatic messages
         self.email_check_interval = 60  # 1 minute
         
         # Track sent emails for reply detection
@@ -173,6 +175,8 @@ class MessageRouter:
             return await self._send_calendar_summary(from_phone)
         elif command == "/help":
             return await self._send_help_message(from_phone)
+        elif command == "/autoemails":
+            return await self._toggle_auto_emails(from_phone)
         else:
             return await self.whatsapp.send_message(
                 from_phone, 
@@ -654,6 +658,7 @@ Respuesta sugerida: {response.get('response', 'No response')[:200]}...
             response += f"📧 Gmail: {'✅' if status['gmail']['authenticated'] else '❌'}\n"
             response += f"📅 Calendar: {'✅' if status['calendar']['authenticated'] else '❌'}\n"
             response += f"🤖 AI: {'✅' if status['ai']['summarizer']['initialized'] else '❌'}\n"
+            response += f"📬 Auto-emails: {'✅' if self.auto_check_emails else '❌'}\n"
             response += f"⏳ Acciones Pendientes: {status['hitl']['pending_actions_count']}\n"
             
             return await self.whatsapp.send_message(from_phone, response)
@@ -668,42 +673,16 @@ Respuesta sugerida: {response.get('response', 'No response')[:200]}...
     async def _handle_ai_conversation(self, message: str, from_phone: str) -> Dict[str, Any]:
         """Handle general conversation using AI"""
         try:
-            # Simple AI-like responses for common questions
-            message_lower = message.lower().strip()
+            # Check if we have AI conversation available
+            ai_status = self.conversation_ai.get_status()
             
-            # Greeting responses (Spanish and English)
-            if any(word in message_lower for word in ["hello", "hi", "hey", "good morning", "good afternoon", "good evening", "hola", "buenos días", "buenas tardes", "buenas noches"]):
-                response = "¡Hola! 👋 Soy tu asistente de WhatsApp. ¿En qué te puedo ayudar? Puedes preguntarme sobre tus correos, calendario o simplemente platicar."
-            
-            # Help requests (Spanish and English)
-            elif any(word in message_lower for word in ["help", "what can you do", "what do you do", "ayuda", "qué puedes hacer", "qué haces"]):
-                response = "Te puedo ayudar con:\n📧 Tus correos\n📅 Tu calendario\n💬 Platicar contigo\n\n¡Usa /help para ver todos los comandos!"
-            
-            # Status questions (Spanish and English)
-            elif any(word in message_lower for word in ["how are you", "status", "working", "cómo estás", "estado", "funcionando"]):
-                response = "¡Todo súper bien! 🤖 Todo está funcionando perfecto. ¿Qué quieres hacer?"
-            
-            # Email questions (Spanish and English)
-            elif any(word in message_lower for word in ["email", "emails", "mail", "correo", "correos"]):
-                response = "¡Claro! Te puedo ayudar con tus correos. Usa /emails para ver los nuevos o pídeme lo que necesites."
-            
-            # Calendar questions (Spanish and English)
-            elif any(word in message_lower for word in ["calendar", "schedule", "meeting", "appointment", "calendario", "programar", "reunión", "cita"]):
-                response = "¡Perfecto! Te ayudo con tu calendario. Usa /calendar para ver tu agenda o pídeme que programe algo."
-            
-            # Time/date questions (Spanish and English)
-            elif any(word in message_lower for word in ["time", "date", "today", "tomorrow", "hora", "fecha", "hoy", "mañana"]):
-                from datetime import datetime
-                now = datetime.now()
-                response = f"Hoy es {now.strftime('%A, %d de %B de %Y')} y son las {now.strftime('%I:%M %p')}. ¿En qué te ayudo?"
-            
-            # Thank you responses (Spanish and English)
-            elif any(word in message_lower for word in ["thank", "thanks", "appreciate", "gracias", "agradezco"]):
-                response = "¡De nada! 😊 ¿Necesitas algo más?"
-            
-            # Default response
+            if ai_status.get("configured", False):
+                # Use real ChatGPT for responses
+                context = "Eres un asistente de WhatsApp que ayuda con correos, calendario y conversación general."
+                response = await self.conversation_ai.generate_response(message, context)
             else:
-                response = f"Entiendo que dijiste: '{message}'\n\n¡Estoy aquí para ayudarte! Puedes preguntarme sobre tus correos, calendario o simplemente platicar. Usa /help para ver los comandos."
+                # Fallback to simple pattern matching
+                response = await self._handle_simple_conversation(message)
             
             return await self.whatsapp.send_message(from_phone, response)
             
@@ -711,8 +690,46 @@ Respuesta sugerida: {response.get('response', 'No response')[:200]}...
             logger.error(f"Error in AI conversation: {str(e)}")
             return await self.whatsapp.send_message(
                 from_phone, 
-                "Sorry, I'm having trouble processing your message right now. Please try again or use /help for commands."
+                "Lo siento, estoy teniendo problemas para procesar tu mensaje. ¿Puedo ayudarte con algo más específico?"
             )
+    
+    async def _handle_simple_conversation(self, message: str) -> str:
+        """Handle simple conversation with pattern matching (fallback)"""
+        message_lower = message.lower().strip()
+        
+        # Greeting responses (Spanish and English)
+        if any(word in message_lower for word in ["hello", "hi", "hey", "good morning", "good afternoon", "good evening", "hola", "buenos días", "buenas tardes", "buenas noches"]):
+            return "¡Hola! 👋 Soy tu asistente de WhatsApp. ¿En qué te puedo ayudar? Puedes preguntarme sobre tus correos, calendario o simplemente platicar."
+        
+        # Help requests (Spanish and English)
+        elif any(word in message_lower for word in ["help", "what can you do", "what do you do", "ayuda", "qué puedes hacer", "qué haces"]):
+            return "Te puedo ayudar con:\n📧 Tus correos\n📅 Tu calendario\n💬 Platicar contigo\n\n¡Usa /help para ver todos los comandos!"
+        
+        # Status questions (Spanish and English)
+        elif any(word in message_lower for word in ["how are you", "status", "working", "cómo estás", "estado", "funcionando"]):
+            return "¡Todo súper bien! 🤖 Todo está funcionando perfecto. ¿Qué quieres hacer?"
+        
+        # Email questions (Spanish and English)
+        elif any(word in message_lower for word in ["email", "emails", "mail", "correo", "correos"]):
+            return "¡Claro! Te puedo ayudar con tus correos. Usa /emails para ver los nuevos o pídeme lo que necesites."
+        
+        # Calendar questions (Spanish and English)
+        elif any(word in message_lower for word in ["calendar", "schedule", "meeting", "appointment", "calendario", "programar", "reunión", "cita"]):
+            return "¡Perfecto! Te ayudo con tu calendario. Usa /calendar para ver tu agenda o pídeme que programe algo."
+        
+        # Time/date questions (Spanish and English)
+        elif any(word in message_lower for word in ["time", "date", "today", "tomorrow", "hora", "fecha", "hoy", "mañana"]):
+            from datetime import datetime
+            now = datetime.now()
+            return f"Hoy es {now.strftime('%A, %d de %B de %Y')} y son las {now.strftime('%I:%M %p')}. ¿En qué te ayudo?"
+        
+        # Thank you responses (Spanish and English)
+        elif any(word in message_lower for word in ["thank", "thanks", "appreciate", "gracias", "agradezco"]):
+            return "¡De nada! 😊 ¿Necesitas algo más?"
+        
+        # Default response
+        else:
+            return f"Entiendo que dijiste: '{message}'\n\n¡Estoy aquí para ayudarte! Puedes preguntarme sobre tus correos, calendario o simplemente platicar. Usa /help para ver los comandos."
     
     async def _send_help_message(self, from_phone: str) -> Dict[str, Any]:
         """Send help message to user"""
@@ -723,6 +740,7 @@ Comandos:
 /emails - Revisar correos nuevos (solo @binara.pro)
 /allemails - Revisar todos los correos sin leer
 /calendar - Ver resumen del calendario
+/autoemails - Activar/desactivar revisión automática de correos
 /help - Mostrar esta ayuda
 
 Calendario:
@@ -740,6 +758,24 @@ Respuestas:
 """
         
         return await self.whatsapp.send_message(from_phone, help_text)
+    
+    async def _toggle_auto_emails(self, from_phone: str) -> Dict[str, Any]:
+        """Toggle automatic email checking"""
+        self.auto_check_emails = not self.auto_check_emails
+        
+        if self.auto_check_emails:
+            # Start the background task if it's not running
+            if self._background_task is None:
+                self._background_task = asyncio.create_task(self._email_monitoring_loop())
+            message = "✅ Auto-email checking ENABLED. I'll check for new emails every minute."
+        else:
+            # Stop the background task
+            if self._background_task:
+                self._background_task.cancel()
+                self._background_task = None
+            message = "❌ Auto-email checking DISABLED. I'll only check emails when you ask."
+        
+        return await self.whatsapp.send_message(from_phone, message)
     
     async def _execute_approved_action(self, hitl_result: Dict[str, Any]) -> Dict[str, Any]:
         """Execute an approved action"""
