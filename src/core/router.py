@@ -202,11 +202,23 @@ class MessageRouter:
         elif "reply" in message_lower or "responder" in message_lower:
             return await self._handle_reply_command(message, from_phone)
         else:
-            return await self._check_and_send_emails(from_phone)
+            # Default response for general messages
+            return await self.whatsapp.send_message(
+                from_phone, 
+                "👋 ¡Hola! Soy tu asistente. Puedes preguntarme sobre:\n\n📧 Correos: 'revisar correos'\n📅 Calendario: 'horarios disponibles'\n📝 Enviar email: 'enviar email a...'\n\n¿En qué puedo ayudarte?"
+            )
     
     async def _check_availability_command(self, message: str, from_phone: str) -> Dict[str, Any]:
         """Handle availability check command"""
         try:
+            # Check if Calendar is authenticated
+            calendar_status = self.calendar.get_status()
+            if not calendar_status.get("authenticated", False):
+                return await self.whatsapp.send_message(
+                    from_phone, 
+                    "📅 Google Calendar no está configurado. Por favor, configura las credenciales de Calendar primero."
+                )
+            
             # Parse date and time from message
             # This is a simplified parser - you might want to use a more sophisticated one
             import re
@@ -326,6 +338,14 @@ class MessageRouter:
     async def _check_and_send_emails(self, from_phone: str) -> Dict[str, Any]:
         """Check for new emails and send summaries"""
         try:
+            # Check if Gmail is authenticated
+            gmail_status = self.gmail.get_status()
+            if not gmail_status.get("authenticated", False):
+                return await self.whatsapp.send_message(
+                    from_phone, 
+                    "📧 Gmail no está configurado. Por favor, configura las credenciales de Gmail primero."
+                )
+            
             # Get unread emails
             emails = await self.gmail.get_unread_emails()
             
