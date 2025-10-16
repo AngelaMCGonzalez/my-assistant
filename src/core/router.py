@@ -34,10 +34,47 @@ class MessageRouter:
         # Configuration
         self.my_phone_number = whatsapp.my_phone_number
         self.auto_check_emails = True
-        self.email_check_interval = 300  # 5 minutes
+        self.email_check_interval = 60  # 1 minute
+        
+        # Track sent emails for reply detection
+        self.sent_emails = {}  # thread_id -> email_info
+        self._load_sent_emails()
         
         # Background tasks will be started when the event loop is running
         self._background_task = None
+    
+    def _load_sent_emails(self):
+        """Load sent emails tracking from file"""
+        try:
+            import json
+            import os
+            
+            sent_emails_file = "data/sent_emails.json"
+            if os.path.exists(sent_emails_file):
+                with open(sent_emails_file, 'r') as f:
+                    self.sent_emails = json.load(f)
+                logger.info(f"Loaded {len(self.sent_emails)} tracked emails")
+            else:
+                logger.info("No sent emails file found, starting fresh")
+        except Exception as e:
+            logger.error(f"Error loading sent emails: {str(e)}")
+            self.sent_emails = {}
+    
+    def _save_sent_emails(self):
+        """Save sent emails tracking to file"""
+        try:
+            import json
+            import os
+            
+            # Create data directory if it doesn't exist
+            os.makedirs("data", exist_ok=True)
+            
+            sent_emails_file = "data/sent_emails.json"
+            with open(sent_emails_file, 'w') as f:
+                json.dump(self.sent_emails, f, indent=2)
+            logger.info(f"Saved {len(self.sent_emails)} tracked emails")
+        except Exception as e:
+            logger.error(f"Error saving sent emails: {str(e)}")
     
     def start_background_tasks(self):
         """Start background tasks when event loop is available"""
@@ -109,8 +146,8 @@ class MessageRouter:
         if any(word in message.lower() for word in ["schedule", "meeting", "appointment", "calendar"]):
             return await self._handle_calendar_command(message, response_phone)
         
-        # Handle email commands
-        if any(word in message.lower() for word in ["email", "reply", "send"]):
+        # Handle email commands (English and Spanish)
+        if any(word in message.lower() for word in ["email", "reply", "send", "correo", "enviar", "envía", "envíame"]):
             return await self._handle_email_command(message, response_phone)
         
         # Handle any other message with AI
@@ -157,9 +194,12 @@ class MessageRouter:
         """Handle email-related commands"""
         message_lower = message.lower()
         
-        if "check" in message_lower or "new" in message_lower:
+        # Check for email sending requests (Spanish and English)
+        if any(word in message_lower for word in ["envíame", "enviar", "send", "correo a", "email to"]):
+            return await self._handle_send_email_command(message, from_phone)
+        elif "check" in message_lower or "new" in message_lower or "revisar" in message_lower:
             return await self._check_and_send_emails(from_phone)
-        elif "reply" in message_lower:
+        elif "reply" in message_lower or "responder" in message_lower:
             return await self._handle_reply_command(message, from_phone)
         else:
             return await self._check_and_send_emails(from_phone)
@@ -333,6 +373,133 @@ class MessageRouter:
                 f"❌ Error al revisar todos los correos: {str(e)}"
             )
     
+    async def _handle_send_email_command(self, message: str, from_phone: str) -> Dict[str, Any]:
+        """Handle send email command"""
+        try:
+            import re
+            
+            # Extract email address
+            email_pattern = r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})'
+            email_match = re.search(email_pattern, message)
+            
+            if not email_match:
+                return await self.whatsapp.send_message(
+                    from_phone, 
+                    "❌ No se encontró una dirección de correo válida en el mensaje."
+                )
+            
+            recipient_email = email_match.group(1)
+            
+            # Generate email content using AI
+            email_content = await self._generate_email_content(message, recipient_email)
+            
+            # Send the email
+            result = await self.gmail.send_email(
+                to=recipient_email,
+                subject=email_content["subject"],
+                body=email_content["body"]
+            )
+            
+            if result.get("success"):
+                # Track the sent email for reply detection
+                thread_id = result.get("thread_id")
+                if thread_id:
+                    self.sent_emails[thread_id] = {
+                        "recipient": recipient_email,
+                        "subject": email_content["subject"],
+                        "sent_time": asyncio.get_event_loop().time(),
+                        "original_request": message
+                    }
+                    self._save_sent_emails()  # Save to file
+                    logger.info(f"Tracking sent email thread: {thread_id} to {recipient_email}")
+                
+                return await self.whatsapp.send_message(
+                    from_phone, 
+                    f"✅ Correo enviado exitosamente a {recipient_email}\n\nAsunto: {email_content['subject']}\n\nContenido: {email_content['body'][:100]}..."
+                )
+            else:
+                return await self.whatsapp.send_message(
+                    from_phone, 
+                    f"❌ Error al enviar el correo: {result.get('error', 'Error desconocido')}"
+                )
+                
+        except Exception as e:
+            logger.error(f"Error handling send email command: {str(e)}")
+            return await self.whatsapp.send_message(
+                from_phone, 
+                f"❌ Error al procesar la solicitud de correo: {str(e)}"
+            )
+    
+    async def _generate_email_content(self, message: str, recipient: str) -> Dict[str, str]:
+        """Generate email content using AI"""
+        try:
+            import re
+            
+            # Extract the actual request content, removing the instruction part
+            # Look for patterns like "preguntando si está disponible para una reunión mañana a las 9 a.m."
+            meeting_pattern = r'preguntando si está disponible para una reunión (.+?)(?:\.|$)'
+            meeting_match = re.search(meeting_pattern, message.lower())
+            
+            if meeting_match:
+                meeting_details = meeting_match.group(1)
+                subject = "¿Podemos reunirnos?"
+                body = f"""Hola {recipient.split('@')[0]},
+
+¿Cómo estás? Te escribo para ver si podemos reunirnos.
+
+¿Estarías disponible para una reunión {meeting_details}?
+
+Si ese horario no te funciona, dime cuándo te conviene mejor.
+
+¡Gracias!
+
+Saludos"""
+            else:
+                # For other types of requests, extract the actual content
+                # Remove instruction words and extract the core message
+                content = message
+                # Remove common instruction patterns
+                instruction_patterns = [
+                    r'envíame un correo a [^ ]+ preguntando',
+                    r'send me an email to [^ ]+ asking',
+                    r'envía un correo a [^ ]+ preguntando',
+                    r'envíame un correo a [^ ]+ diciendo',
+                    r'send an email to [^ ]+ saying'
+                ]
+                
+                for pattern in instruction_patterns:
+                    content = re.sub(pattern, '', content, flags=re.IGNORECASE)
+                
+                content = content.strip()
+                
+                subject = "Hola"
+                body = f"""Hola {recipient.split('@')[0]},
+
+{content}
+
+¡Gracias!
+
+Saludos"""
+            
+            return {
+                "subject": subject,
+                "body": body
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating email content: {str(e)}")
+            return {
+                "subject": "Hola",
+                "body": f"Hola {recipient.split('@')[0]},\n\n¿Cómo estás?\n\nSaludos"
+            }
+    
+    async def _handle_reply_command(self, message: str, from_phone: str) -> Dict[str, Any]:
+        """Handle reply command"""
+        return await self.whatsapp.send_message(
+            from_phone, 
+            "Función de respuesta no implementada aún."
+        )
+    
     async def _process_new_email(self, email_data: Dict[str, Any], from_phone: str) -> Dict[str, Any]:
         """Process a new email and send summary to user"""
         try:
@@ -364,6 +531,56 @@ class MessageRouter:
         except Exception as e:
             logger.error(f"Error processing email: {str(e)}")
             return {"status": "error", "message": str(e)}
+    
+    async def _process_email_reply(self, email_data: Dict[str, Any], from_phone: str) -> Dict[str, Any]:
+        """Process a reply to a tracked email"""
+        try:
+            thread_id = email_data.get("thread_id")
+            sent_email_info = self.sent_emails.get(thread_id, {})
+            
+            # Summarize the reply
+            summary = await self.summarizer.summarize_email(email_data)
+            
+            # Generate suggested response to the reply
+            response = await self.responder.generate_response(email_data, summary)
+            
+            # Create pending action for reply to the reply
+            action_data = {
+                "email_id": email_data["id"],
+                "thread_id": thread_id,
+                "sender": email_data["sender"],
+                "subject": email_data["subject"],
+                "summary": summary["summary"],
+                "suggested_reply": response["response"],
+                "original_recipient": sent_email_info.get("recipient", "Unknown"),
+                "original_subject": sent_email_info.get("subject", "Unknown")
+            }
+            
+            action = self.hitl_manager.create_pending_action("email_reply", action_data)
+            
+            # Send notification about the reply
+            notification_message = f"""📧 ¡Recibiste una respuesta!
+
+De: {email_data.get('sender', 'Unknown')}
+Asunto: {email_data.get('subject', 'No subject')}
+
+Resumen: {summary.get('summary', 'No summary')}
+
+Respuesta sugerida: {response.get('response', 'No response')[:200]}...
+
+¿Quieres enviar esta respuesta? Responde ✅ para aprobar o ❌ para rechazar."""
+            
+            await self.whatsapp.send_message(from_phone, notification_message)
+            
+            logger.info(f"Processed email reply from {email_data.get('sender')} in thread {thread_id}")
+            return {"status": "success", "action_created": action.id}
+            
+        except Exception as e:
+            logger.error(f"Error processing email reply: {str(e)}")
+            return await self.whatsapp.send_message(
+                from_phone, 
+                f"❌ Error al procesar la respuesta: {str(e)}"
+            )
     
     async def _send_calendar_summary(self, from_phone: str) -> Dict[str, Any]:
         """Send calendar summary to user"""
@@ -412,12 +629,12 @@ class MessageRouter:
                 }
             }
             
-            response = "🤖 System Status\n\n"
+            response = "🤖 Estado del Sistema\n\n"
             response += f"📱 WhatsApp: {'✅' if status['whatsapp']['configured'] else '❌'}\n"
             response += f"📧 Gmail: {'✅' if status['gmail']['authenticated'] else '❌'}\n"
             response += f"📅 Calendar: {'✅' if status['calendar']['authenticated'] else '❌'}\n"
             response += f"🤖 AI: {'✅' if status['ai']['summarizer']['initialized'] else '❌'}\n"
-            response += f"⏳ Pending Actions: {status['hitl']['pending_actions_count']}\n"
+            response += f"⏳ Acciones Pendientes: {status['hitl']['pending_actions_count']}\n"
             
             return await self.whatsapp.send_message(from_phone, response)
             
@@ -434,39 +651,39 @@ class MessageRouter:
             # Simple AI-like responses for common questions
             message_lower = message.lower().strip()
             
-            # Greeting responses
-            if any(word in message_lower for word in ["hello", "hi", "hey", "good morning", "good afternoon", "good evening"]):
-                response = "Hello! 👋 I'm your WhatsApp assistant. How can I help you today? You can ask me about your emails, calendar, or just chat!"
+            # Greeting responses (Spanish and English)
+            if any(word in message_lower for word in ["hello", "hi", "hey", "good morning", "good afternoon", "good evening", "hola", "buenos días", "buenas tardes", "buenas noches"]):
+                response = "¡Hola! 👋 Soy tu asistente de WhatsApp. ¿En qué te puedo ayudar? Puedes preguntarme sobre tus correos, calendario o simplemente platicar."
             
-            # Help requests
-            elif any(word in message_lower for word in ["help", "what can you do", "what do you do"]):
-                response = "I can help you with:\n📧 Email management\n📅 Calendar scheduling\n💬 General conversation\n\nUse /help for specific commands!"
+            # Help requests (Spanish and English)
+            elif any(word in message_lower for word in ["help", "what can you do", "what do you do", "ayuda", "qué puedes hacer", "qué haces"]):
+                response = "Te puedo ayudar con:\n📧 Tus correos\n📅 Tu calendario\n💬 Platicar contigo\n\n¡Usa /help para ver todos los comandos!"
             
-            # Status questions
-            elif any(word in message_lower for word in ["how are you", "status", "working"]):
-                response = "I'm working great! 🤖 All systems are operational. What would you like to do?"
+            # Status questions (Spanish and English)
+            elif any(word in message_lower for word in ["how are you", "status", "working", "cómo estás", "estado", "funcionando"]):
+                response = "¡Todo súper bien! 🤖 Todo está funcionando perfecto. ¿Qué quieres hacer?"
             
-            # Email questions
-            elif any(word in message_lower for word in ["email", "emails", "mail"]):
-                response = "I can help with your emails! Use /emails to check your inbox or ask me to help with specific email tasks."
+            # Email questions (Spanish and English)
+            elif any(word in message_lower for word in ["email", "emails", "mail", "correo", "correos"]):
+                response = "¡Claro! Te puedo ayudar con tus correos. Usa /emails para ver los nuevos o pídeme lo que necesites."
             
-            # Calendar questions
-            elif any(word in message_lower for word in ["calendar", "schedule", "meeting", "appointment"]):
-                response = "I can help with your calendar! Use /calendar to see your schedule or ask me to book meetings."
+            # Calendar questions (Spanish and English)
+            elif any(word in message_lower for word in ["calendar", "schedule", "meeting", "appointment", "calendario", "programar", "reunión", "cita"]):
+                response = "¡Perfecto! Te ayudo con tu calendario. Usa /calendar para ver tu agenda o pídeme que programe algo."
             
-            # Time/date questions
-            elif any(word in message_lower for word in ["time", "date", "today", "tomorrow"]):
+            # Time/date questions (Spanish and English)
+            elif any(word in message_lower for word in ["time", "date", "today", "tomorrow", "hora", "fecha", "hoy", "mañana"]):
                 from datetime import datetime
                 now = datetime.now()
-                response = f"Today is {now.strftime('%A, %B %d, %Y')} and it's {now.strftime('%I:%M %p')}. How can I help you?"
+                response = f"Hoy es {now.strftime('%A, %d de %B de %Y')} y son las {now.strftime('%I:%M %p')}. ¿En qué te ayudo?"
             
-            # Thank you responses
-            elif any(word in message_lower for word in ["thank", "thanks", "appreciate"]):
-                response = "You're welcome! 😊 Is there anything else I can help you with?"
+            # Thank you responses (Spanish and English)
+            elif any(word in message_lower for word in ["thank", "thanks", "appreciate", "gracias", "agradezco"]):
+                response = "¡De nada! 😊 ¿Necesitas algo más?"
             
             # Default response
             else:
-                response = f"I understand you said: '{message}'\n\nI'm here to help! You can ask me about your emails, calendar, or just chat. Use /help for specific commands."
+                response = f"Entiendo que dijiste: '{message}'\n\n¡Estoy aquí para ayudarte! Puedes preguntarme sobre tus correos, calendario o simplemente platicar. Usa /help para ver los comandos."
             
             return await self.whatsapp.send_message(from_phone, response)
             
@@ -525,13 +742,23 @@ Respuestas:
     async def _execute_email_reply(self, action_data: Dict[str, Any]) -> Dict[str, Any]:
         """Execute email reply action"""
         try:
-            # Send the email
-            result = await self.gmail.send_email(
-                to=action_data["sender"],
-                subject=f"Re: {action_data['subject']}",
-                body=action_data["suggested_reply"],
-                reply_to_message_id=action_data["email_id"]
-            )
+            # Get the thread_id if available (for replies to tracked emails)
+            thread_id = action_data.get("thread_id")
+            
+            if thread_id:
+                # This is a reply to a tracked email - send as a new email in the same thread
+                result = await self.gmail.send_email(
+                    to=action_data["sender"],
+                    subject=action_data["subject"],  # Keep original subject (already has Re:)
+                    body=action_data["suggested_reply"]
+                )
+            else:
+                # This is a reply to a regular email - send as new email
+                result = await self.gmail.send_email(
+                    to=action_data["sender"],
+                    subject=f"Re: {action_data['subject']}",
+                    body=action_data["suggested_reply"]
+                )
             
             if result["success"]:
                 # Mark original email as read
@@ -540,20 +767,24 @@ Respuestas:
                 # Send confirmation to user
                 await self.whatsapp.send_message(
                     self.my_phone_number,
-                    f"✅ Email sent successfully to {action_data['sender']}"
+                    f"✅ Correo enviado exitosamente a {action_data['sender']}"
                 )
                 
                 return {"status": "success", "message": "Email sent"}
             else:
                 await self.whatsapp.send_message(
                     self.my_phone_number,
-                    f"❌ Failed to send email: {result.get('error', 'Unknown error')}"
+                    f"❌ Error al enviar el correo: {result.get('error', 'Unknown error')}"
                 )
                 
                 return {"status": "error", "message": result.get("error")}
                 
         except Exception as e:
             logger.error(f"Error executing email reply: {str(e)}")
+            await self.whatsapp.send_message(
+                self.my_phone_number,
+                f"❌ Error al procesar la respuesta: {str(e)}"
+            )
             return {"status": "error", "message": str(e)}
     
     async def _execute_calendar_event(self, action_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -592,7 +823,7 @@ Respuestas:
             return {"status": "error", "message": str(e)}
     
     async def _email_monitoring_loop(self):
-        """Background loop to monitor for new emails"""
+        """Background loop to monitor for new emails and replies"""
         while True:
             try:
                 if self.auto_check_emails:
@@ -600,7 +831,12 @@ Respuestas:
                     emails = await self.gmail.get_unread_emails()
                     
                     for email in emails:
-                        await self._process_new_email(email, self.my_phone_number)
+                        # Check if this is a reply to a tracked email
+                        thread_id = email.get("thread_id")
+                        if thread_id and thread_id in self.sent_emails:
+                            await self._process_email_reply(email, self.my_phone_number)
+                        else:
+                            await self._process_new_email(email, self.my_phone_number)
                 
                 # Wait before next check
                 await asyncio.sleep(self.email_check_interval)

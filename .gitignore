@@ -28,27 +28,11 @@ ENV/
 env.bak/
 venv.bak/
 
-# Environment variables
+# Environment Variables
 .env
 .env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Credentials and tokens
-credentials/*.json
-*.json
-!user_style.json
-!hitl_config.json
-
-# Logs
-logs/
-*.log
-
-# Data
-data/
-*.db
-*.sqlite
+.env.production
+.env.staging
 
 # IDE
 .vscode/
@@ -65,6 +49,40 @@ data/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Data files (keep structure but ignore content)
+data/*.json
+!data/.gitkeep
+
+# Test files (remove for production)
+test_*.py
+*_test.py
+tests/
+
+# Setup files (remove for production)
+setup*.py
+*_setup.py
+
+# Development files
+run.py
+docker-compose.yml
+Dockerfile
+
+# Credentials (should be uploaded separately)
+credentials.json
+token.json
+calendar_token.json
+gmail_token.json
+hitl_config.json
+user_style.json
+credentials/
+*.json
+!requirements*.json
+!package*.json
 
 # Temporary files
 *.tmp

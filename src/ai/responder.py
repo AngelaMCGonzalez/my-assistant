@@ -133,6 +133,8 @@ class EmailResponder:
             response_template = """
             Eres un asistente que responde correos electrónicos. Responde SOLO con el texto del correo, sin explicaciones adicionales.
 
+            CONTEXTO: Este es un correo de respuesta a una conversación que TÚ (el asistente) inició preguntando sobre una reunión. La persona está respondiendo a tu solicitud original.
+
             Correo a responder:
             De: {sender}
             Asunto: {subject}
@@ -140,10 +142,17 @@ class EmailResponder:
             
             Resumen: {summary}
             
-            Escribe una respuesta profesional en español que incluya:
-            - Saludo apropiado
-            - Respuesta al contenido del correo
-            - Despedida profesional
+            INSTRUCCIONES IMPORTANTES:
+            - Si la persona dice que NO puede reunirse en el horario que propusiste, responde que entiendes y pregunta por otros horarios disponibles
+            - Si la persona dice que SÍ puede reunirse, confirma la reunión
+            - Si la persona sugiere un horario diferente, responde si te funciona o sugiere alternativas
+            - Usa un tono casual y amigable en español
+            - NO uses lenguaje formal
+            
+            Escribe una respuesta en español que incluya:
+            - Saludo casual
+            - Respuesta apropiada al contenido del correo
+            - Despedida amigable
             
             Respuesta:"""
             
