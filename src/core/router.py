@@ -179,17 +179,29 @@ class MessageRouter:
         if message.startswith("/"):
             return await self._handle_command(message, response_phone)
         
-        # Handle calendar commands (more specific to avoid loops) - DISABLED
-        # calendar_keywords = ["schedule", "meeting", "appointment", "agendar", "programar", "reunión", "cita"]
-        # if any(word in message.lower() for word in calendar_keywords) and not any(word in message.lower() for word in ["resumen", "summary", "calendario"]):
-        #     return await self._handle_calendar_command(message, response_phone)
+        # Check if there are any pending HITL actions that need user response
+        pending_actions = self.hitl_manager.get_pending_actions()
+        if pending_actions:
+            # If there are pending actions, only respond to approval/rejection responses
+            if any(word in message.lower() for word in ["✅", "❌", "sí", "no", "yes", "no", "aprobar", "rechazar"]):
+                # This might be a response to a pending action, let HITL handle it
+                return {"status": "hitl_processing", "message": "Processing HITL response"}
+            else:
+                # There are pending actions but this doesn't look like a response
+                return {"status": "pending_actions", "message": "Please respond to pending actions first"}
         
-        # Handle email commands (English and Spanish) - DISABLED
-        # if any(word in message.lower() for word in ["email", "reply", "send", "correo", "enviar", "envía", "envíame"]):
-        #     return await self._handle_email_command(message, response_phone)
+        # Only respond to direct questions or requests (Human-in-the-Loop approach)
+        question_indicators = [
+            "?", "pregunta", "question", "ayuda", "help", "qué", "what", "cómo", "how", 
+            "cuándo", "when", "dónde", "where", "por qué", "why", "puedes", "can you"
+        ]
         
-        # Handle any other message with AI
-        return await self._handle_ai_conversation(message, response_phone)
+        if any(indicator in message.lower() for indicator in question_indicators):
+            # This looks like a question or request, respond with AI
+            return await self._handle_ai_conversation(message, response_phone)
+        else:
+            # Not a question or request, don't respond automatically
+            return {"status": "no_response", "message": "No automatic response needed"}
     
     async def _handle_external_message(self, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle messages from external sources (notifications, etc.)"""

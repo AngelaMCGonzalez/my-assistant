@@ -118,6 +118,15 @@ class HITLManager:
         """Get a pending action by ID"""
         return self.pending_actions.get(action_id)
     
+    def get_pending_actions(self) -> List[PendingAction]:
+        """Get all pending actions"""
+        # Clean up expired actions first
+        self._cleanup_expired_actions()
+        
+        # Return only non-expired pending actions
+        return [action for action in self.pending_actions.values() 
+                if action.status == "pending" and not action.is_expired()]
+    
     def process_user_response(self, message: str, from_phone: str) -> Optional[Dict[str, Any]]:
         """
         Process a user response to a pending action
