@@ -10,7 +10,7 @@ from datetime import datetime
 import json
 
 try:
-    import openai
+    from openai import OpenAI
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
@@ -38,8 +38,7 @@ class ConversationAI:
         try:
             api_key = os.getenv('OPENAI_API_KEY')
             if api_key:
-                openai.api_key = api_key
-                self.client = openai
+                self.client = OpenAI(api_key=api_key)
                 logger.info("OpenAI client initialized successfully")
             else:
                 logger.warning("OpenAI API key not found in environment variables")
@@ -103,7 +102,7 @@ class ConversationAI:
             conversation_context = self._build_conversation_context()
             
             # Generate response
-            response = self.client.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=conversation_context + [
                     {"role": "system", "content": system_prompt},
