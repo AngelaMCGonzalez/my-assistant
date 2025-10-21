@@ -949,7 +949,15 @@ No responde automáticamente a mensajes normales.
         
         # Check if it's from the correct phone number (your phone)
         from_phone = message_data.get("from", "")
-        if from_phone not in ["5215664087506@c.us", "5664087506"]:  # Your phone numbers
+        # Your phone numbers in different formats
+        your_phone_numbers = [
+            "5215530386114@c.us",  # Your actual phone number
+            "5215664087506@c.us",  # UltraMsg number
+            "5530386114",          # Without country code
+            "5664087506"           # UltraMsg without country code
+        ]
+        if from_phone not in your_phone_numbers:
+            logger.info(f"Message not from your phone: {from_phone}")
             return False
         
         # Check if message has actual content
