@@ -57,22 +57,30 @@ class CalendarIntegration:
                 # Create temporary files from environment variables
                 import tempfile
                 
-                # Create credentials file
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as creds_file:
-                    creds_file.write(calendar_credentials_json)
-                    credentials_file_path = creds_file.name
-                
-                # Create token file
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as token_file:
-                    token_file.write(calendar_token_json)
-                    token_file_path = token_file.name
-                
-                # Load credentials from token file
-                creds = Credentials.from_authorized_user_file(token_file_path, self.scopes)
-                
-                # Clean up temporary files
-                os.unlink(credentials_file_path)
-                os.unlink(token_file_path)
+                try:
+                    # Create credentials file
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as creds_file:
+                        creds_file.write(calendar_credentials_json)
+                        credentials_file_path = creds_file.name
+                    
+                    # Create token file
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as token_file:
+                        token_file.write(calendar_token_json)
+                        token_file_path = token_file.name
+                    
+                    logger.info(f"Created temporary files: {credentials_file_path}, {token_file_path}")
+                    
+                    # Load credentials from token file
+                    creds = Credentials.from_authorized_user_file(token_file_path, self.scopes)
+                    logger.info(f"Loaded credentials from token file: {creds is not None}")
+                    
+                    # Clean up temporary files
+                    os.unlink(credentials_file_path)
+                    os.unlink(token_file_path)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing environment credentials: {str(e)}")
+                    creds = None
                 
             else:
                 # Fallback to file-based authentication
@@ -104,8 +112,19 @@ class CalendarIntegration:
                 self.credentials = creds
                 self.service = build('calendar', 'v3', credentials=creds)
                 logger.info("Google Calendar API authenticated successfully")
+                
+                # Test the service with a simple API call
+                try:
+                    calendar_list = self.service.calendarList().list().execute()
+                    logger.info(f"Calendar API test successful. Found {len(calendar_list.get('items', []))} calendars")
+                except Exception as e:
+                    logger.error(f"Calendar API test failed: {str(e)}")
+                    self.service = None
             else:
                 logger.error("Calendar authentication failed: Invalid credentials")
+                if creds:
+                    logger.error(f"Credentials expired: {creds.expired}")
+                    logger.error(f"Credentials valid: {creds.valid}")
                 self.service = None
             
         except Exception as e:
