@@ -48,6 +48,7 @@ class MessageRouter:
         self.processed_messages = set()  # Track processed message IDs
         self.last_response_time = {}  # phone -> timestamp
         self.response_cooldown = 5  # seconds between responses to same phone
+        self.emergency_stop = False  # Emergency stop flag to prevent flooding
         
         # Background tasks will be started when the event loop is running
         self._background_task = None
@@ -126,6 +127,11 @@ class MessageRouter:
     
     async def _handle_user_message(self, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle messages from the user (commands and responses)"""
+        # EMERGENCY STOP - If flooding detected, stop all responses
+        if self.emergency_stop:
+            logger.warning("EMERGENCY STOP ACTIVE - No responses allowed")
+            return {"status": "emergency_stop", "message": "Assistant disabled due to flooding"}
+        
         message = message_data.get("body", "").strip()
         from_phone = message_data.get("from", "")
         to_phone = message_data.get("to", "")
@@ -221,18 +227,19 @@ class MessageRouter:
                 # There are pending actions but this doesn't look like a response
                 return {"status": "pending_actions", "message": "Please respond to pending actions first"}
         
-        # Only respond to direct questions or requests (Human-in-the-Loop approach)
-        question_indicators = [
-            "?", "pregunta", "question", "ayuda", "help", "qué", "what", "cómo", "how", 
-            "cuándo", "when", "dónde", "where", "por qué", "why", "puedes", "can you"
-        ]
+        # ONLY respond to messages that are actually from the user
+        # Check if this is a real user message (not a webhook event)
+        if not self._is_real_user_message(message_data):
+            logger.info("Skipping webhook event - not a real user message")
+            return {"status": "skipped", "message": "Not a real user message"}
         
-        if any(indicator in message.lower() for indicator in question_indicators):
-            # This looks like a question or request, respond with AI
-            return await self._handle_ai_conversation(message, response_phone)
+        # Handle the actual user message
+        if message.startswith("/"):
+            # It's a command
+            return await self._handle_command(message, response_phone)
         else:
-            # Not a question or request, don't respond automatically
-            return {"status": "no_response", "message": "No automatic response needed"}
+            # It's a regular message from the user - respond with AI
+            return await self._handle_ai_conversation(message, response_phone)
     
     async def _handle_external_message(self, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle messages from external sources (notifications, etc.)"""
@@ -260,6 +267,10 @@ class MessageRouter:
             return await self._show_personality(from_phone)
         elif command == "/summary":
             return await self._show_conversation_summary(from_phone)
+        elif command == "/stop":
+            return await self._emergency_stop_assistant(from_phone)
+        elif command == "/start":
+            return await self._start_assistant(from_phone)
         # elif command == "/autoemails":
         #     return await self._toggle_auto_emails(from_phone)
         else:
@@ -832,14 +843,11 @@ Comandos disponibles:
 /clear - Limpiar historial de conversación
 /personality - Ver personalidad de la IA
 /summary - Resumen de la conversación
+/stop - Detener asistente (emergencia)
+/start - Activar asistente
 
-Funciones disponibles:
-• Conversación inteligente con IA
-• Memoria de conversación
-• Personalización automática
-• Respuestas contextuales
-
-¡Puedo platicar contigo sobre cualquier tema! 🗣️
+IMPORTANTE: Solo responde a comandos que empiecen con /
+No responde automáticamente a mensajes normales.
 """
         
         return await self.whatsapp.send_message(from_phone, help_text)
@@ -892,6 +900,64 @@ Funciones disponibles:
                 from_phone, 
                 f"❌ Error al mostrar resumen: {str(e)}"
             )
+    
+    async def _emergency_stop_assistant(self, from_phone: str) -> Dict[str, Any]:
+        """Emergency stop the assistant to prevent flooding"""
+        try:
+            self.emergency_stop = True
+            return await self.whatsapp.send_message(
+                from_phone, 
+                "🚨 ASISTENTE DETENIDO\n\nEl asistente ha sido detenido para prevenir inundación de mensajes. Usa /start para reactivarlo."
+            )
+        except Exception as e:
+            logger.error(f"Error stopping assistant: {str(e)}")
+            return await self.whatsapp.send_message(
+                from_phone, 
+                f"❌ Error al detener asistente: {str(e)}"
+            )
+    
+    async def _start_assistant(self, from_phone: str) -> Dict[str, Any]:
+        """Start the assistant after emergency stop"""
+        try:
+            self.emergency_stop = False
+            return await self.whatsapp.send_message(
+                from_phone, 
+                "✅ ASISTENTE ACTIVADO\n\nEl asistente está funcionando nuevamente. Solo responde a comandos que empiecen con /"
+            )
+        except Exception as e:
+            logger.error(f"Error starting assistant: {str(e)}")
+            return await self.whatsapp.send_message(
+                from_phone, 
+                f"❌ Error al activar asistente: {str(e)}"
+            )
+    
+    def _is_real_user_message(self, message_data: Dict[str, Any]) -> bool:
+        """Check if this is a real user message (not a webhook event)"""
+        # Check if it's from the assistant itself
+        if message_data.get("fromMe", False) or message_data.get("is_from_me", False):
+            return False
+        
+        # Check if it's a webhook event
+        event_type = message_data.get("event_type", "")
+        if event_type in ["message_ack", "message_create", "message_sent", "message_delivered"]:
+            return False
+        
+        # Check if it's an acknowledgment
+        message = message_data.get("body", "").lower()
+        if any(ack_word in message for ack_word in ["sent", "delivered", "read", "ok", "true"]):
+            return False
+        
+        # Check if it's from the correct phone number (your phone)
+        from_phone = message_data.get("from", "")
+        if from_phone not in ["5215664087506@c.us", "5664087506"]:  # Your phone numbers
+            return False
+        
+        # Check if message has actual content
+        if not message or len(message.strip()) < 2:
+            return False
+        
+        # If we get here, it's likely a real user message
+        return True
     
     async def _toggle_auto_emails(self, from_phone: str) -> Dict[str, Any]:
         """Toggle automatic email checking"""
