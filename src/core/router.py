@@ -9,11 +9,11 @@ from datetime import datetime, timedelta
 import asyncio
 
 from src.integrations.whatsapp import WhatsAppIntegration
-from src.integrations.gmail import GmailIntegration
-from src.integrations.calendar import CalendarIntegration
+# from src.integrations.gmail import GmailIntegration
+# from src.integrations.calendar import CalendarIntegration
 from src.core.hitl import HITLManager
-from src.ai.summarizer import EmailSummarizer
-from src.ai.responder import EmailResponder
+# from src.ai.summarizer import EmailSummarizer
+# from src.ai.responder import EmailResponder
 from src.ai.conversation import ConversationAI
 
 logger = logging.getLogger(__name__)
@@ -21,16 +21,16 @@ logger = logging.getLogger(__name__)
 class MessageRouter:
     """Main router that coordinates all integrations and handles message flow"""
     
-    def __init__(self, whatsapp: WhatsAppIntegration, gmail: GmailIntegration, 
-                 calendar: CalendarIntegration, hitl_manager: HITLManager):
+    def __init__(self, whatsapp: WhatsAppIntegration, gmail=None, 
+                 calendar=None, hitl_manager: HITLManager=None):
         self.whatsapp = whatsapp
-        self.gmail = gmail
-        self.calendar = calendar
+        # self.gmail = gmail
+        # self.calendar = calendar
         self.hitl_manager = hitl_manager
         
         # Initialize AI components
-        self.summarizer = EmailSummarizer()
-        self.responder = EmailResponder(calendar_integration=calendar)
+        # self.summarizer = EmailSummarizer()
+        # self.responder = EmailResponder(calendar_integration=calendar)
         self.conversation_ai = ConversationAI()
         
         # Configuration
@@ -150,14 +150,14 @@ class MessageRouter:
         if message.startswith("/"):
             return await self._handle_command(message, response_phone)
         
-        # Handle calendar commands (more specific to avoid loops)
-        calendar_keywords = ["schedule", "meeting", "appointment", "agendar", "programar", "reunión", "cita"]
-        if any(word in message.lower() for word in calendar_keywords) and not any(word in message.lower() for word in ["resumen", "summary", "calendario"]):
-            return await self._handle_calendar_command(message, response_phone)
+        # Handle calendar commands (more specific to avoid loops) - DISABLED
+        # calendar_keywords = ["schedule", "meeting", "appointment", "agendar", "programar", "reunión", "cita"]
+        # if any(word in message.lower() for word in calendar_keywords) and not any(word in message.lower() for word in ["resumen", "summary", "calendario"]):
+        #     return await self._handle_calendar_command(message, response_phone)
         
-        # Handle email commands (English and Spanish)
-        if any(word in message.lower() for word in ["email", "reply", "send", "correo", "enviar", "envía", "envíame"]):
-            return await self._handle_email_command(message, response_phone)
+        # Handle email commands (English and Spanish) - DISABLED
+        # if any(word in message.lower() for word in ["email", "reply", "send", "correo", "enviar", "envía", "envíame"]):
+        #     return await self._handle_email_command(message, response_phone)
         
         # Handle any other message with AI
         return await self._handle_ai_conversation(message, response_phone)
@@ -174,16 +174,22 @@ class MessageRouter:
         
         if command == "/status":
             return await self._send_status_message(from_phone)
-        elif command == "/emails":
-            return await self._check_and_send_emails(from_phone)
-        elif command == "/allemails":
-            return await self._check_and_send_all_emails(from_phone)
-        elif command == "/calendar":
-            return await self._send_calendar_summary(from_phone)
+        # elif command == "/emails":
+        #     return await self._check_and_send_emails(from_phone)
+        # elif command == "/allemails":
+        #     return await self._check_and_send_all_emails(from_phone)
+        # elif command == "/calendar":
+        #     return await self._send_calendar_summary(from_phone)
         elif command == "/help":
             return await self._send_help_message(from_phone)
-        elif command == "/autoemails":
-            return await self._toggle_auto_emails(from_phone)
+        elif command == "/clear":
+            return await self._clear_conversation(from_phone)
+        elif command == "/personality":
+            return await self._show_personality(from_phone)
+        elif command == "/summary":
+            return await self._show_conversation_summary(from_phone)
+        # elif command == "/autoemails":
+        #     return await self._toggle_auto_emails(from_phone)
         else:
             return await self.whatsapp.send_message(
                 from_phone, 
@@ -656,21 +662,22 @@ Respuesta sugerida: {response.get('response', 'No response')[:200]}...
         try:
             status = {
                 "whatsapp": self.whatsapp.get_status(),
-                "gmail": self.gmail.get_status(),
-                "calendar": self.calendar.get_status(),
+                # "gmail": self.gmail.get_status(),
+                # "calendar": self.calendar.get_status(),
                 "hitl": self.hitl_manager.get_status(),
                 "ai": {
-                    "summarizer": self.summarizer.get_status(),
-                    "responder": self.responder.get_status()
+                    # "summarizer": self.summarizer.get_status(),
+                    # "responder": self.responder.get_status()
+                    "conversation": self.conversation_ai.get_status()
                 }
             }
             
             response = "🤖 Estado del Sistema\n\n"
             response += f"📱 WhatsApp: {'✅' if status['whatsapp']['configured'] else '❌'}\n"
-            response += f"📧 Gmail: {'✅' if status['gmail']['authenticated'] else '❌'}\n"
-            response += f"📅 Calendar: {'✅' if status['calendar']['authenticated'] else '❌'}\n"
-            response += f"🤖 AI: {'✅' if status['ai']['summarizer']['initialized'] else '❌'}\n"
-            response += f"📬 Auto-emails: {'✅' if self.auto_check_emails else '❌'}\n"
+            response += f"📧 Gmail: ❌ (Deshabilitado)\n"
+            response += f"📅 Calendar: ❌ (Deshabilitado)\n"
+            response += f"🤖 AI: {'✅' if status['ai']['conversation']['configured'] else '❌'}\n"
+            response += f"📬 Auto-emails: ❌ (Deshabilitado)\n"
             response += f"⏳ Acciones Pendientes: {status['hitl']['pending_actions_count']}\n"
             
             return await self.whatsapp.send_message(from_phone, response)
@@ -689,9 +696,9 @@ Respuesta sugerida: {response.get('response', 'No response')[:200]}...
             ai_status = self.conversation_ai.get_status()
             
             if ai_status.get("configured", False):
-                # Use real ChatGPT for responses
-                context = "Eres un asistente de WhatsApp que ayuda con correos, calendario y conversación general."
-                response = await self.conversation_ai.generate_response(message, context)
+                # Use enhanced conversation AI
+                context = "Eres un asistente de WhatsApp inteligente y amigable."
+                response = await self.conversation_ai.generate_response(message, context, from_phone)
             else:
                 # Fallback to simple pattern matching
                 response = await self._handle_simple_conversation(message)
@@ -721,13 +728,13 @@ Respuesta sugerida: {response.get('response', 'No response')[:200]}...
         elif any(word in message_lower for word in ["how are you", "status", "working", "cómo estás", "estado", "funcionando"]):
             return "¡Todo súper bien! 🤖 Todo está funcionando perfecto. ¿Qué quieres hacer?"
         
-        # Email questions (Spanish and English)
-        elif any(word in message_lower for word in ["email", "emails", "mail", "correo", "correos"]):
-            return "¡Claro! Te puedo ayudar con tus correos. Usa /emails para ver los nuevos o pídeme lo que necesites."
+        # Email questions (Spanish and English) - DISABLED
+        # elif any(word in message_lower for word in ["email", "emails", "mail", "correo", "correos"]):
+        #     return "¡Claro! Te puedo ayudar con tus correos. Usa /emails para ver los nuevos o pídeme lo que necesites."
         
-        # Calendar questions (Spanish and English)
-        elif any(word in message_lower for word in ["calendar", "schedule", "meeting", "appointment", "calendario", "programar", "reunión", "cita"]):
-            return "¡Perfecto! Te ayudo con tu calendario. Usa /calendar para ver tu agenda o pídeme que programe algo."
+        # Calendar questions (Spanish and English) - DISABLED
+        # elif any(word in message_lower for word in ["calendar", "schedule", "meeting", "appointment", "calendario", "programar", "reunión", "cita"]):
+        #     return "¡Perfecto! Te ayudo con tu calendario. Usa /calendar para ver tu agenda o pídeme que programe algo."
         
         # Time/date questions (Spanish and English)
         elif any(word in message_lower for word in ["time", "date", "today", "tomorrow", "hora", "fecha", "hoy", "mañana"]):
@@ -741,35 +748,78 @@ Respuesta sugerida: {response.get('response', 'No response')[:200]}...
         
         # Default response
         else:
-            return f"Entiendo que dijiste: '{message}'\n\n¡Estoy aquí para ayudarte! Puedes preguntarme sobre tus correos, calendario o simplemente platicar. Usa /help para ver los comandos."
+            return f"Entiendo que dijiste: '{message}'\n\n¡Estoy aquí para ayudarte! Puedo platicar contigo y responder preguntas. Usa /help para ver los comandos disponibles."
     
     async def _send_help_message(self, from_phone: str) -> Dict[str, Any]:
         """Send help message to user"""
         help_text = """🤖 Asistente de WhatsApp - Ayuda
 
-Comandos:
+Comandos disponibles:
 /status - Verificar estado del sistema
-/emails - Revisar correos nuevos (solo @binara.pro)
-/allemails - Revisar todos los correos sin leer
-/calendar - Ver resumen del calendario
-/autoemails - Activar/desactivar revisión automática de correos
 /help - Mostrar esta ayuda
+/clear - Limpiar historial de conversación
+/personality - Ver personalidad de la IA
+/summary - Resumen de la conversación
 
-Calendario:
-• "verificar disponibilidad" - Encontrar horarios libres
-• "programar reunión a las 2:30pm" - Programar una reunión
-• "agendar cita mañana 10am" - Agendar cita
+Funciones disponibles:
+• Conversación inteligente con IA
+• Memoria de conversación
+• Personalización automática
+• Respuestas contextuales
 
-Correo:
-• "revisar correos" - Revisar correos nuevos
-• "responder a [correo]" - Responder a correo específico
-
-Respuestas:
-✅ - Aprobar acción
-❌ - Rechazar acción
+¡Puedo platicar contigo sobre cualquier tema! 🗣️
 """
         
         return await self.whatsapp.send_message(from_phone, help_text)
+    
+    async def _clear_conversation(self, from_phone: str) -> Dict[str, Any]:
+        """Clear conversation history"""
+        try:
+            self.conversation_ai.clear_conversation_history()
+            return await self.whatsapp.send_message(
+                from_phone, 
+                "🧹 ¡Conversación limpiada! Empezamos de nuevo."
+            )
+        except Exception as e:
+            logger.error(f"Error clearing conversation: {str(e)}")
+            return await self.whatsapp.send_message(
+                from_phone, 
+                f"❌ Error al limpiar la conversación: {str(e)}"
+            )
+    
+    async def _show_personality(self, from_phone: str) -> Dict[str, Any]:
+        """Show AI personality traits"""
+        try:
+            personality = self.conversation_ai.personality_traits
+            response = f"""🤖 Mi Personalidad:
+
+😊 Tono: {personality['tone']}
+📝 Formalidad: {personality['formality']}
+😄 Humor: {personality['humor']}
+🌍 Idioma: {personality['language']}
+📏 Longitud: {personality['response_length']}
+
+¿Te gustaría que cambie algo? ¡Dímelo!"""
+            
+            return await self.whatsapp.send_message(from_phone, response)
+        except Exception as e:
+            logger.error(f"Error showing personality: {str(e)}")
+            return await self.whatsapp.send_message(
+                from_phone, 
+                f"❌ Error al mostrar personalidad: {str(e)}"
+            )
+    
+    async def _show_conversation_summary(self, from_phone: str) -> Dict[str, Any]:
+        """Show conversation summary"""
+        try:
+            summary = self.conversation_ai.get_conversation_summary()
+            return await self.whatsapp.send_message(from_phone, summary)
+        except Exception as e:
+            logger.error(f"Error showing conversation summary: {str(e)}")
+            return await self.whatsapp.send_message(
+                from_phone, 
+                f"❌ Error al mostrar resumen: {str(e)}"
+            )
     
     async def _toggle_auto_emails(self, from_phone: str) -> Dict[str, Any]:
         """Toggle automatic email checking"""

@@ -13,8 +13,8 @@ from contextlib import asynccontextmanager
 
 from src.core.router import MessageRouter
 from src.integrations.whatsapp import WhatsAppIntegration
-from src.integrations.gmail import GmailIntegration
-from src.integrations.calendar import CalendarIntegration
+# from src.integrations.gmail import GmailIntegration
+# from src.integrations.calendar import CalendarIntegration
 from src.core.hitl import HITLManager
 
 # Load environment variables
@@ -27,15 +27,15 @@ logger = logging.getLogger(__name__)
 
 # Global variables for dependency injection
 whatsapp = None
-gmail = None
-calendar = None
+# gmail = None
+# calendar = None
 hitl_manager = None
 router = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown"""
-    global whatsapp, gmail, calendar, hitl_manager, router
+    global whatsapp, hitl_manager, router
     
     # Startup
     logger.info("Starting Personal WhatsApp Assistant...")
@@ -43,12 +43,12 @@ async def lifespan(app: FastAPI):
     try:
         # Initialize integrations
         whatsapp = WhatsAppIntegration()
-        gmail = GmailIntegration()
-        calendar = CalendarIntegration()
+        # gmail = GmailIntegration()
+        # calendar = CalendarIntegration()
         hitl_manager = HITLManager()
         
         # Initialize message router
-        router = MessageRouter(whatsapp, gmail, calendar, hitl_manager)
+        router = MessageRouter(whatsapp, None, None, hitl_manager)
         
         # Start background tasks
         await router.start_background_tasks_async()
@@ -117,62 +117,62 @@ async def whatsapp_webhook(request: Request):
         logger.error(f"Error processing WhatsApp webhook: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.post("/gmail-webhook")
-async def gmail_webhook(request: Request):
-    """
-    Webhook endpoint for Gmail notifications (if using Gmail push notifications)
-    """
-    if router is None:
-        raise HTTPException(status_code=503, detail="Router not initialized")
-    
-    try:
-        body = await request.body()
-        data = json.loads(body)
-        
-        logger.info(f"Received Gmail webhook: {data}")
-        
-        # Process new email
-        response = await router.process_new_email(data)
-        
-        return {"status": "success", "response": response}
-        
-    except Exception as e:
-        logger.error(f"Error processing Gmail webhook: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+# @app.post("/gmail-webhook")
+# async def gmail_webhook(request: Request):
+#     """
+#     Webhook endpoint for Gmail notifications (if using Gmail push notifications)
+#     """
+#     if router is None:
+#         raise HTTPException(status_code=503, detail="Router not initialized")
+#     
+#     try:
+#         body = await request.body()
+#         data = json.loads(body)
+#         
+#         logger.info(f"Received Gmail webhook: {data}")
+#         
+#         # Process new email
+#         response = await router.process_new_email(data)
+#         
+#         return {"status": "success", "response": response}
+#         
+#     except Exception as e:
+#         logger.error(f"Error processing Gmail webhook: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.post("/calendar-webhook")
-async def calendar_webhook(request: Request):
-    """
-    Webhook endpoint for Google Calendar notifications
-    """
-    if router is None:
-        raise HTTPException(status_code=503, detail="Router not initialized")
-    
-    try:
-        body = await request.body()
-        data = json.loads(body)
-        
-        logger.info(f"Received Calendar webhook: {data}")
-        
-        # Process calendar event
-        response = await router.process_calendar_event(data)
-        
-        return {"status": "success", "response": response}
-        
-    except Exception as e:
-        logger.error(f"Error processing Calendar webhook: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+# @app.post("/calendar-webhook")
+# async def calendar_webhook(request: Request):
+#     """
+#     Webhook endpoint for Google Calendar notifications
+#     """
+#     if router is None:
+#         raise HTTPException(status_code=503, detail="Router not initialized")
+#     
+#     try:
+#         body = await request.body()
+#         data = json.loads(body)
+#         
+#         logger.info(f"Received Calendar webhook: {data}")
+#         
+#         # Process calendar event
+#         response = await router.process_calendar_event(data)
+#         
+#         return {"status": "success", "response": response}
+#         
+#     except Exception as e:
+#         logger.error(f"Error processing Calendar webhook: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/status")
 async def get_status():
     """Get status of all integrations"""
-    if not all([whatsapp, gmail, calendar, hitl_manager]):
+    if not all([whatsapp, hitl_manager]):
         return {"error": "Integrations not initialized"}
     
     return {
         "whatsapp": whatsapp.get_status(),
-        "gmail": gmail.get_status(),
-        "calendar": calendar.get_status(),
+        # "gmail": gmail.get_status(),
+        # "calendar": calendar.get_status(),
         "hitl": hitl_manager.get_status()
     }
 
