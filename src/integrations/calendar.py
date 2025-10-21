@@ -74,6 +74,16 @@ class CalendarIntegration:
                     creds = Credentials.from_authorized_user_file(token_file_path, self.scopes)
                     logger.info(f"Loaded credentials from token file: {creds is not None}")
                     
+                    # Check if credentials need refresh
+                    if creds and creds.expired and creds.refresh_token:
+                        logger.info("Credentials expired, attempting to refresh...")
+                        try:
+                            creds.refresh(Request())
+                            logger.info("Credentials refreshed successfully")
+                        except Exception as refresh_error:
+                            logger.error(f"Failed to refresh credentials: {str(refresh_error)}")
+                            creds = None
+                    
                     # Clean up temporary files
                     os.unlink(credentials_file_path)
                     os.unlink(token_file_path)
@@ -125,6 +135,10 @@ class CalendarIntegration:
                 if creds:
                     logger.error(f"Credentials expired: {creds.expired}")
                     logger.error(f"Credentials valid: {creds.valid}")
+                    if creds.expired and not creds.refresh_token:
+                        logger.error("CRITICAL: Token expired and no refresh token available!")
+                        logger.error("You need to re-authenticate the calendar integration.")
+                        logger.error("Please update CALENDAR_TOKEN_JSON with a fresh token.")
                 self.service = None
             
         except Exception as e:
