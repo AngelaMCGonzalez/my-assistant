@@ -45,6 +45,7 @@ class MessageRouter:
         # Track recent messages to prevent loops
         self.recent_messages = {}  # phone -> [messages]
         self.max_recent_messages = 5
+        self.processed_messages = set()  # Track processed message IDs
         
         # Background tasks will be started when the event loop is running
         self._background_task = None
@@ -129,6 +130,34 @@ class MessageRouter:
         
         # Debug logging
         logger.info(f"Handling user message from: {from_phone}, to: {to_phone}")
+        
+        # Skip if message is empty or just acknowledgments
+        if not message or len(message) < 2:
+            logger.info("Skipping empty or very short message")
+            return {"status": "skipped", "message": "Empty message"}
+        
+        # Skip if this is a message from the assistant itself (prevent loops)
+        if message_data.get("fromMe", False) or message_data.get("is_from_me", False):
+            logger.info("Skipping message from assistant itself")
+            return {"status": "skipped", "message": "Message from assistant"}
+        
+        # Skip if this is an acknowledgment message
+        if any(ack_word in message.lower() for ack_word in ["sent", "delivered", "read", "ok", "true"]):
+            logger.info("Skipping acknowledgment message")
+            return {"status": "skipped", "message": "Acknowledgment message"}
+        
+        # Skip if we've already processed this message
+        message_id = message_data.get("message_id") or message_data.get("id")
+        if message_id and message_id in self.processed_messages:
+            logger.info(f"Skipping already processed message: {message_id}")
+            return {"status": "skipped", "message": "Already processed"}
+        
+        # Mark this message as processed
+        if message_id:
+            self.processed_messages.add(message_id)
+            # Keep only last 100 processed message IDs to prevent memory issues
+            if len(self.processed_messages) > 100:
+                self.processed_messages = set(list(self.processed_messages)[-50:])
         
         # Determine where to send the response
         if message_data.get("is_to_ultramsg", False):
