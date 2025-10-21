@@ -10,7 +10,7 @@ import asyncio
 
 from src.integrations.whatsapp import WhatsAppIntegration
 # from src.integrations.gmail import GmailIntegration
-# from src.integrations.calendar import CalendarIntegration
+from src.integrations.calendar import CalendarIntegration
 from src.core.hitl import HITLManager
 # from src.ai.summarizer import EmailSummarizer
 # from src.ai.responder import EmailResponder
@@ -25,7 +25,7 @@ class MessageRouter:
                  calendar=None, hitl_manager: HITLManager=None):
         self.whatsapp = whatsapp
         # self.gmail = gmail
-        # self.calendar = calendar
+        self.calendar = calendar
         self.hitl_manager = hitl_manager
         
         # Initialize AI components
@@ -238,8 +238,13 @@ class MessageRouter:
             # It's a command
             return await self._handle_command(message, response_phone)
         else:
-            # It's a regular message from the user - respond with AI
-            return await self._handle_ai_conversation(message, response_phone)
+            # Check for calendar keywords in regular messages
+            calendar_keywords = ["schedule", "meeting", "appointment", "agendar", "programar", "reunión", "cita", "calendario"]
+            if any(word in message.lower() for word in calendar_keywords):
+                return await self._handle_calendar_command(message, response_phone)
+            else:
+                # It's a regular message from the user - respond with AI
+                return await self._handle_ai_conversation(message, response_phone)
     
     async def _handle_external_message(self, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle messages from external sources (notifications, etc.)"""
@@ -267,6 +272,16 @@ class MessageRouter:
             return await self._show_personality(from_phone)
         elif command == "/summary":
             return await self._show_conversation_summary(from_phone)
+        elif command == "/calendar":
+            return await self._send_calendar_summary(from_phone)
+        elif command == "/events":
+            return await self._list_calendar_events(from_phone)
+        elif command == "/create":
+            return await self._create_calendar_event_prompt(from_phone)
+        elif command == "/delete":
+            return await self._delete_calendar_event_prompt(from_phone)
+        elif command == "/edit":
+            return await self._edit_calendar_event_prompt(from_phone)
         elif command == "/stop":
             return await self._emergency_stop_assistant(from_phone)
         elif command == "/start":
@@ -740,13 +755,130 @@ Respuesta sugerida: {response.get('response', 'No response')[:200]}...
                 f"❌ Error al obtener el calendario: {str(e)}"
             )
     
+    async def _list_calendar_events(self, from_phone: str) -> Dict[str, Any]:
+        """List upcoming calendar events"""
+        try:
+            if not self.calendar:
+                return await self.whatsapp.send_message(
+                    from_phone, 
+                    "❌ Calendar integration not available"
+                )
+            
+            # Get next 7 days of events
+            events = await self.calendar.get_upcoming_events(days=7)
+            
+            if not events:
+                return await self.whatsapp.send_message(
+                    from_phone, 
+                    "📅 No tienes eventos programados para los próximos 7 días"
+                )
+            
+            response = "📅 Próximos Eventos (7 días):\n\n"
+            for i, event in enumerate(events, 1):
+                start_time = datetime.fromisoformat(event['start'].replace('Z', '+00:00'))
+                title = event.get('title', 'Sin título')
+                event_id = event.get('id', '')
+                response += f"{i}. {title}\n   {start_time.strftime('%a %b %d, %I:%M %p')}\n   ID: {event_id[:8]}...\n\n"
+            
+            return await self.whatsapp.send_message(from_phone, response)
+            
+        except Exception as e:
+            logger.error(f"Error listing calendar events: {str(e)}")
+            return await self.whatsapp.send_message(
+                from_phone, 
+                f"❌ Error al listar eventos: {str(e)}"
+            )
+    
+    async def _create_calendar_event_prompt(self, from_phone: str) -> Dict[str, Any]:
+        """Prompt user to create a calendar event"""
+        try:
+            response = """📅 Crear Evento en Calendario
+
+Por favor, proporciona la información del evento en el siguiente formato:
+
+Título: [Nombre del evento]
+Fecha: [DD/MM/YYYY]
+Hora: [HH:MM]
+Duración: [X minutos/horas]
+Descripción: [Opcional]
+
+Ejemplo:
+Título: Reunión con el equipo
+Fecha: 15/01/2024
+Hora: 14:30
+Duración: 1 hora
+Descripción: Revisión de proyecto"""
+            
+            return await self.whatsapp.send_message(from_phone, response)
+            
+        except Exception as e:
+            logger.error(f"Error creating calendar event prompt: {str(e)}")
+            return await self.whatsapp.send_message(
+                from_phone, 
+                f"❌ Error al crear evento: {str(e)}"
+            )
+    
+    async def _delete_calendar_event_prompt(self, from_phone: str) -> Dict[str, Any]:
+        """Prompt user to delete a calendar event"""
+        try:
+            response = """🗑️ Eliminar Evento del Calendario
+
+Para eliminar un evento, necesito el ID del evento.
+
+Usa el comando /events para ver la lista de eventos con sus IDs.
+
+Luego responde con:
+Eliminar: [ID del evento]
+
+Ejemplo:
+Eliminar: abc123def456"""
+            
+            return await self.whatsapp.send_message(from_phone, response)
+            
+        except Exception as e:
+            logger.error(f"Error deleting calendar event prompt: {str(e)}")
+            return await self.whatsapp.send_message(
+                from_phone, 
+                f"❌ Error al eliminar evento: {str(e)}"
+            )
+    
+    async def _edit_calendar_event_prompt(self, from_phone: str) -> Dict[str, Any]:
+        """Prompt user to edit a calendar event"""
+        try:
+            response = """✏️ Editar Evento del Calendario
+
+Para editar un evento, necesito el ID del evento.
+
+Usa el comando /events para ver la lista de eventos con sus IDs.
+
+Luego responde con:
+Editar: [ID del evento]
+Nuevo título: [Nuevo título]
+Nueva fecha: [DD/MM/YYYY]
+Nueva hora: [HH:MM]
+
+Ejemplo:
+Editar: abc123def456
+Nuevo título: Reunión actualizada
+Nueva fecha: 16/01/2024
+Nueva hora: 15:00"""
+            
+            return await self.whatsapp.send_message(from_phone, response)
+            
+        except Exception as e:
+            logger.error(f"Error editing calendar event prompt: {str(e)}")
+            return await self.whatsapp.send_message(
+                from_phone, 
+                f"❌ Error al editar evento: {str(e)}"
+            )
+    
     async def _send_status_message(self, from_phone: str) -> Dict[str, Any]:
         """Send system status to user"""
         try:
             status = {
                 "whatsapp": self.whatsapp.get_status(),
                 # "gmail": self.gmail.get_status(),
-                # "calendar": self.calendar.get_status(),
+                "calendar": self.calendar.get_status() if self.calendar else {"authenticated": False, "configured": False},
                 "hitl": self.hitl_manager.get_status(),
                 "ai": {
                     # "summarizer": self.summarizer.get_status(),
@@ -758,7 +890,7 @@ Respuesta sugerida: {response.get('response', 'No response')[:200]}...
             response = "🤖 Estado del Sistema\n\n"
             response += f"📱 WhatsApp: {'✅' if status['whatsapp']['configured'] else '❌'}\n"
             response += f"📧 Gmail: ❌ (Deshabilitado)\n"
-            response += f"📅 Calendar: ❌ (Deshabilitado)\n"
+            response += f"📅 Calendar: {'✅' if status['calendar']['authenticated'] else '❌'}\n"
             response += f"🤖 AI: {'✅' if status['ai']['conversation']['configured'] else '❌'}\n"
             response += f"📬 Auto-emails: ❌ (Deshabilitado)\n"
             response += f"⏳ Acciones Pendientes: {status['hitl']['pending_actions_count']}\n"
@@ -843,11 +975,24 @@ Comandos disponibles:
 /clear - Limpiar historial de conversación
 /personality - Ver personalidad de la IA
 /summary - Resumen de la conversación
+
+📅 Comandos de Calendario:
+/calendar - Ver resumen del calendario
+/events - Listar próximos eventos
+/create - Crear nuevo evento
+/delete - Eliminar evento
+/edit - Editar evento existente
+
 /stop - Detener asistente (emergencia)
 /start - Activar asistente
 
-IMPORTANTE: Solo responde a comandos que empiecen con /
-No responde automáticamente a mensajes normales.
+Funciones disponibles:
+• Conversación inteligente con IA
+• Gestión completa de calendario
+• Memoria de conversación
+• Respuestas contextuales
+
+También puedes decir: "agendar reunión", "programar cita", "ver calendario"
 """
         
         return await self.whatsapp.send_message(from_phone, help_text)

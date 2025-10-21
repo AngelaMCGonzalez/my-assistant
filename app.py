@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from src.core.router import MessageRouter
 from src.integrations.whatsapp import WhatsAppIntegration
 # from src.integrations.gmail import GmailIntegration
-# from src.integrations.calendar import CalendarIntegration
+from src.integrations.calendar import CalendarIntegration
 from src.core.hitl import HITLManager
 
 # Load environment variables
@@ -28,14 +28,14 @@ logger = logging.getLogger(__name__)
 # Global variables for dependency injection
 whatsapp = None
 # gmail = None
-# calendar = None
+calendar = None
 hitl_manager = None
 router = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown"""
-    global whatsapp, hitl_manager, router
+    global whatsapp, calendar, hitl_manager, router
     
     # Startup
     logger.info("Starting Personal WhatsApp Assistant...")
@@ -44,11 +44,11 @@ async def lifespan(app: FastAPI):
         # Initialize integrations
         whatsapp = WhatsAppIntegration()
         # gmail = GmailIntegration()
-        # calendar = CalendarIntegration()
+        calendar = CalendarIntegration()
         hitl_manager = HITLManager()
         
         # Initialize message router
-        router = MessageRouter(whatsapp, None, None, hitl_manager)
+        router = MessageRouter(whatsapp, None, calendar, hitl_manager)
         
         # Start background tasks
         await router.start_background_tasks_async()
@@ -166,13 +166,13 @@ async def whatsapp_webhook(request: Request):
 @app.get("/status")
 async def get_status():
     """Get status of all integrations"""
-    if not all([whatsapp, hitl_manager]):
+    if not all([whatsapp, calendar, hitl_manager]):
         return {"error": "Integrations not initialized"}
     
     return {
         "whatsapp": whatsapp.get_status(),
         # "gmail": gmail.get_status(),
-        # "calendar": calendar.get_status(),
+        "calendar": calendar.get_status(),
         "hitl": hitl_manager.get_status()
     }
 
