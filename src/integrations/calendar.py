@@ -26,7 +26,11 @@ class CalendarIntegration:
     def __init__(self):
         self.service = None
         self.credentials = None
-        self.scopes = ['https://www.googleapis.com/auth/calendar']
+        self.scopes = [
+            'https://www.googleapis.com/auth/calendar',
+            'https://www.googleapis.com/auth/calendar.events',
+            'https://www.googleapis.com/auth/calendar.readonly'
+        ]
         self.calendar_id = 'primary'  # Use primary calendar by default
         
         if CALENDAR_AVAILABLE:
@@ -82,7 +86,19 @@ class CalendarIntegration:
                             logger.info("Credentials refreshed successfully")
                         except Exception as refresh_error:
                             logger.error(f"Failed to refresh credentials: {str(refresh_error)}")
-                            creds = None
+                            # Try with minimal scopes as fallback
+                            try:
+                                logger.info("Attempting refresh with minimal scopes...")
+                                minimal_creds = Credentials.from_authorized_user_file(token_file_path, ['https://www.googleapis.com/auth/calendar'])
+                                if minimal_creds.expired and minimal_creds.refresh_token:
+                                    minimal_creds.refresh(Request())
+                                    creds = minimal_creds
+                                    logger.info("Refresh successful with minimal scopes")
+                                else:
+                                    creds = None
+                            except Exception as minimal_error:
+                                logger.error(f"Minimal scope refresh also failed: {str(minimal_error)}")
+                                creds = None
                     
                     # Clean up temporary files
                     os.unlink(credentials_file_path)
@@ -137,6 +153,11 @@ class CalendarIntegration:
                     logger.error(f"Credentials valid: {creds.valid}")
                     if creds.expired and not creds.refresh_token:
                         logger.error("CRITICAL: Token expired and no refresh token available!")
+                        logger.error("You need to re-authenticate the calendar integration.")
+                        logger.error("Please update CALENDAR_TOKEN_JSON with a fresh token.")
+                    elif creds.expired and creds.refresh_token:
+                        logger.error("CRITICAL: Token expired and refresh failed!")
+                        logger.error("The refresh token may be invalid or have insufficient scopes.")
                         logger.error("You need to re-authenticate the calendar integration.")
                         logger.error("Please update CALENDAR_TOKEN_JSON with a fresh token.")
                 self.service = None
