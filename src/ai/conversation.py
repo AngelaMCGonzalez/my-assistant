@@ -43,8 +43,10 @@ class ConversationAI:
                 logger.info("OpenAI client initialized successfully")
             else:
                 logger.warning("OpenAI API key not found in environment variables")
+                logger.warning("AI conversation will use fallback responses")
         except Exception as e:
             logger.error(f"Error initializing OpenAI client: {str(e)}")
+            logger.warning("AI conversation will use fallback responses")
     
     def _load_user_preferences(self) -> Dict[str, Any]:
         """Load user conversation preferences"""
@@ -101,7 +103,7 @@ class ConversationAI:
             conversation_context = self._build_conversation_context()
             
             # Generate response
-            response = await self.client.ChatCompletion.acreate(
+            response = self.client.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=conversation_context + [
                     {"role": "system", "content": system_prompt},
@@ -125,7 +127,32 @@ class ConversationAI:
             
         except Exception as e:
             logger.error(f"Error generating AI response: {str(e)}")
-            return "Lo siento, estoy teniendo problemas para procesar tu mensaje. ¿Puedo ayudarte con algo más?"
+            # Fallback to simple response
+            return self._get_fallback_response(message)
+    
+    def _get_fallback_response(self, message: str) -> str:
+        """Get a simple fallback response when AI fails"""
+        message_lower = message.lower()
+        
+        # Greeting responses
+        if any(word in message_lower for word in ["hola", "hello", "hi", "hey", "buenos días", "buenas tardes"]):
+            return "¡Hola! 👋 ¿Cómo estás? ¿En qué puedo ayudarte?"
+        
+        # How are you responses
+        elif any(word in message_lower for word in ["cómo estás", "how are you", "qué tal"]):
+            return "¡Todo súper bien! 😊 ¿Y tú cómo estás?"
+        
+        # Help requests
+        elif any(word in message_lower for word in ["ayuda", "help", "qué puedes hacer"]):
+            return "¡Claro! Puedo platicar contigo sobre cualquier tema. ¿De qué quieres hablar?"
+        
+        # Thank you responses
+        elif any(word in message_lower for word in ["gracias", "thanks", "thank you"]):
+            return "¡De nada! 😊 ¿Necesitas algo más?"
+        
+        # Default response
+        else:
+            return f"Entiendo que dijiste: '{message}'\n\n¡Estoy aquí para ayudarte! ¿De qué quieres platicar?"
     
     def _build_enhanced_system_prompt(self, context: str, user_phone: str = None) -> str:
         """Build an enhanced system prompt with personality and context"""
