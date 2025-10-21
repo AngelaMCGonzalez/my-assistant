@@ -46,6 +46,8 @@ class MessageRouter:
         self.recent_messages = {}  # phone -> [messages]
         self.max_recent_messages = 5
         self.processed_messages = set()  # Track processed message IDs
+        self.last_response_time = {}  # phone -> timestamp
+        self.response_cooldown = 5  # seconds between responses to same phone
         
         # Background tasks will be started when the event loop is running
         self._background_task = None
@@ -146,6 +148,24 @@ class MessageRouter:
             logger.info("Skipping acknowledgment message")
             return {"status": "skipped", "message": "Acknowledgment message"}
         
+        # Skip if message contains assistant's own responses (prevent loops)
+        assistant_responses = [
+            "¡claro! puedo platicar contigo sobre cualquier tema",
+            "puedo platicar contigo sobre cualquier tema",
+            "lo siento, estoy teniendo problemas para procesar tu mensaje",
+            "entiendo que dijiste",
+            "estoy aquí para ayudarte"
+        ]
+        if any(response in message.lower() for response in assistant_responses):
+            logger.info("Skipping message containing assistant response")
+            return {"status": "skipped", "message": "Contains assistant response"}
+        
+        # Skip if this is a webhook event for message creation/acknowledgment
+        event_type = message_data.get("event_type", "")
+        if event_type in ["message_ack", "message_create", "message_sent"]:
+            logger.info(f"Skipping webhook event: {event_type}")
+            return {"status": "skipped", "message": f"Webhook event: {event_type}"}
+        
         # Skip if we've already processed this message
         message_id = message_data.get("message_id") or message_data.get("id")
         if message_id and message_id in self.processed_messages:
@@ -158,6 +178,17 @@ class MessageRouter:
             # Keep only last 100 processed message IDs to prevent memory issues
             if len(self.processed_messages) > 100:
                 self.processed_messages = set(list(self.processed_messages)[-50:])
+        
+        # Rate limiting - prevent rapid-fire responses
+        current_time = datetime.now().timestamp()
+        if from_phone in self.last_response_time:
+            time_since_last = current_time - self.last_response_time[from_phone]
+            if time_since_last < self.response_cooldown:
+                logger.info(f"Rate limiting: {time_since_last:.1f}s since last response to {from_phone}")
+                return {"status": "rate_limited", "message": "Too soon since last response"}
+        
+        # Update last response time
+        self.last_response_time[from_phone] = current_time
         
         # Determine where to send the response
         if message_data.get("is_to_ultramsg", False):
